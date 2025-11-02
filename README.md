@@ -56,7 +56,7 @@ After starting, the terminal will show a message similar to:
 - Make sure your phone is on the same Wi-Fi network as your computer.
 
 - Open your browser and go to the HTTPS address shown in the terminal, for example:
-https://192.168.1.10:5000
+https://<ip>:5000
 
 - Accept the browser's security warning by clicking:
 Advanced → Proceed to [your IP address] (unsafe)

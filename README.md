@@ -1,6 +1,6 @@
 
 
-# Web-Based Face Recognition Attendance System Using Flask App and YOLO model
+# OdooFaceTrack Web Based Face Attendance System Using Flask and YOLO
 
 ## Project Description
 

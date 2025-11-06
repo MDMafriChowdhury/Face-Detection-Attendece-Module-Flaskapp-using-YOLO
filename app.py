@@ -134,96 +134,120 @@ def create_user_in_db(user_id, name):
         conn.close()
     return True
 
-# --- NEW: Odoo Attendance Function ---
-def record_attendance_odoo(user_name):
-    """
-    Connects to Odoo and triggers an attendance action for the employee.
-    The employee name in Odoo MUST match the 'user_name' perfectly.
+# --- HELPER: Get Odoo Connection ---
+def get_odoo_connection():
+    """Helper function to connect to Odoo and return the client."""
+    print(f"[Odoo] Attempting to connect to {ODOO_URL}...")
+    odoo = odoorpc.ODOO(
+        ODOO_URL.replace('https://', ''), 
+        protocol='jsonrpc+ssl', 
+        port=443
+    )
+    odoo.login(ODOO_DB, ODOO_USER, ODOO_PASSWORD)
+    print(f"[Odoo] Connection successful.")
+    return odoo
+
+# --- HELPER: Get Odoo Employee ---
+def get_employee_and_state(odoo, user_name):
+    """Finds an employee in Odoo and returns their record and state."""
+    Employee = odoo.env['hr.employee']
+    employee_ids = Employee.search([('name', '=', user_name)])
     
-    *** NEW LOGIC ***
-    This function now replicates the logic from Odoo's private
-    '_attendance_action_change' method to be version-independent.
+    if not employee_ids:
+        msg = f"Odoo Error: Employee '{user_name}' not found."
+        print(f"[Odoo] {msg}")
+        return None, None, msg
+        
+    employee = Employee.browse(employee_ids[0])
+    current_state = employee.attendance_state
+    
+    print(f"[Odoo] Found employee: {employee.name} (ID: {employee.id})")
+    print(f"[Odoo] Employee current state: {current_state}")
+    
+    return employee, current_state, None
+
+# --- NEW: Odoo Check-In Function ---
+def record_check_in(user_name):
+    """
+    Connects to Odoo and checks IN the employee.
+    If already checked in, it returns an error message.
     """
     try:
-        print(f"[Odoo] Attempting to connect to {ODOO_URL}...")
-
-        # *** THIS IS UPDATED FOR ODOO.COM ***
-        # We connect to your Odoo.com host using the 'jsonrpc+ssl' protocol on port 443
-        odoo = odoorpc.ODOO(
-            ODOO_URL.replace('https://', ''), 
-            protocol='jsonrpc+ssl', 
-            port=443
-        )
-        odoo.login(ODOO_DB, ODOO_USER, ODOO_PASSWORD)
-
-        print(f"[Odoo] Connection successful.")
-
-        # 1. Find the Odoo Employee
-        Employee = odoo.env['hr.employee']
-        employee_ids = Employee.search([('name', '=', user_name)])
+        odoo = get_odoo_connection()
+        employee, current_state, error_msg = get_employee_and_state(odoo, user_name)
         
-        if not employee_ids:
-            msg = f"Odoo Error: Employee '{user_name}' not found."
+        if error_msg:
+            return (error_msg, False)
+
+        # --- THIS IS THE NEW LOGIC ---
+        if current_state == 'checked_in':
+            msg = f"'{user_name}' is already checked in."
             print(f"[Odoo] {msg}")
             return (msg, False)
-            
-        employee_id = employee_ids[0]
-        # Get a "browsable" record to read its fields
-        employee = Employee.browse(employee_id)
+        # --- END OF NEW LOGIC ---
+
+        # State is 'checked_out', so proceed with check-in
+        Attendance = odoo.env['hr.attendance']
+        action_date = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         
-        print(f"[Odoo] Found employee: {employee.name} (ID: {employee.id})")
+        print(f"[Odoo] Action: Checking IN")
+        vals = {
+            'employee_id': employee.id,
+            'check_in': action_date,
+        }
+        new_att_id = Attendance.create(vals)
+        print(f"[Odoo] Created new attendance record (ID: {new_att_id})")
+        message = f"'{user_name}' checked in successfully in Odoo."
+        return (message, True)
 
-        # 2. Read the employee's current attendance state
-        # This field ('attendance_state') is confirmed from your hr_employee.py file
-        current_state = employee.attendance_state
-        print(f"[Odoo] Employee current state: {current_state}")
+    except Exception as e:
+        msg = f"Odoo API Error: {str(e)}"
+        print(f"[Odoo] {msg}")
+        return (msg, False)
 
+# --- NEW: Odoo Check-Out Function ---
+def record_check_out(user_name):
+    """
+    Connects to Odoo and checks OUT the employee.
+    If already checked out, it returns an error message.
+    """
+    try:
+        odoo = get_odoo_connection()
+        employee, current_state, error_msg = get_employee_and_state(odoo, user_name)
+        
+        if error_msg:
+            return (error_msg, False)
+
+        # --- THIS IS THE NEW LOGIC ---
+        if current_state == 'checked_out':
+            msg = f"'{user_name}' is already checked out."
+            print(f"[Odoo] {msg}")
+            return (msg, False)
+        # --- END OF NEW LOGIC ---
+        
+        # State is 'checked_in', so proceed with check-out
         Attendance = odoo.env['hr.attendance']
         action_date = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 3. Perform the correct action based on the state
-        if current_state == 'checked_out':
-            # ACTION: Check In
-            # We create a new attendance record
-            print(f"[Odoo] Action: Checking IN")
-            vals = {
-                'employee_id': employee_id,
-                'check_in': action_date,
-            }
-            new_att_id = Attendance.create(vals)
-            print(f"[Odoo] Created new attendance record (ID: {new_att_id})")
-            message = f"'{user_name}' checked in successfully in Odoo."
-            return (message, True)
-
-        elif current_state == 'checked_in':
-            # ACTION: Check Out
-            # We find the last "open" attendance record and close it
-            print(f"[Odoo] Action: Checking OUT")
-            
-            # Find attendance record for this employee that has no check_out
-            domain = [
-                ('employee_id', '=', employee_id),
-                ('check_out', '=', False)
-            ]
-            attendance_ids = Attendance.search(domain, limit=1)
-            
-            if not attendance_ids:
-                msg = f"Odoo Error: Cannot check out. No open check-in record found for '{user_name}'."
-                print(f"[Odoo] {msg}")
-                return (msg, False)
-
-            # Get the one record to update
-            attendance_to_close = Attendance.browse(attendance_ids[0])
-            attendance_to_close.write({'check_out': action_date})
-            
-            print(f"[Odoo] Closed attendance record (ID: {attendance_ids[0]})")
-            message = f"'{user_name}' checked out successfully in Odoo."
-            return (message, True)
-
-        else:
-            msg = f"Odoo Error: Unknown attendance state '{current_state}'."
+        print(f"[Odoo] Action: Checking OUT")
+        
+        domain = [
+            ('employee_id', '=', employee.id),
+            ('check_out', '=', False)
+        ]
+        attendance_ids = Attendance.search(domain, limit=1)
+        
+        if not attendance_ids:
+            msg = f"Odoo Error: Cannot check out. No open check-in record found for '{user_name}'."
             print(f"[Odoo] {msg}")
             return (msg, False)
+
+        attendance_to_close = Attendance.browse(attendance_ids[0])
+        attendance_to_close.write({'check_out': action_date})
+        
+        print(f"[Odoo] Closed attendance record (ID: {attendance_ids[0]})")
+        message = f"'{user_name}' checked out successfully in Odoo."
+        return (message, True)
 
     except Exception as e:
         msg = f"Odoo API Error: {str(e)}"
@@ -344,31 +368,46 @@ def recognize_frame():
     else:
         return jsonify({"status": "unknown", "confidence": round(100 - confidence)})
 
-# --- MODIFIED Attendance Route ---
-@app.route('/attendance_action', methods=['POST'])
-def attendance_action():
+# --- NEW: Check-In Route ---
+@app.route('/api/check_in', methods=['POST'])
+def check_in_action():
     """
-    Handles check-in and check-out button presses.
-    MODIFIED: This now calls the Odoo API function.
+    Handles check-in button presses.
+    Calls the new 'record_check_in' function.
     """
     now = time.time()
     if now - app.last_action_time < COOLDOWN_SECONDS:
         return jsonify({"success": False, "message": "Please wait..."})
     
     data = request.json
-    if data.get('user_id') is None or data.get('user_name') is None:
+    user_name = data.get('user_name')
+    if not user_name:
         return jsonify({"success": False, "message": "No known face detected!"})
 
-    # --- THIS IS THE CHANGE ---
-    user_name = data.get('user_name') # Get the name from the request
+    message, is_success = record_check_in(user_name)
+
+    if is_success:
+        app.last_action_time = now
     
-    # OLD WAY:
-    # message, is_success = record_attendance_db(data['user_id'], data['user_name'], data['action']) 
+    return jsonify({"success": is_success, "message": message})
+
+# --- NEW: Check-Out Route ---
+@app.route('/api/check_out', methods=['POST'])
+def check_out_action():
+    """
+    Handles check-out button presses.
+    Calls the new 'record_check_out' function.
+    """
+    now = time.time()
+    if now - app.last_action_time < COOLDOWN_SECONDS:
+        return jsonify({"success": False, "message": "Please wait..."})
     
-    # NEW WAY:
-    # We pass the 'user_name'. Odoo handles the 'action' (in/out) logic.
-    message, is_success = record_attendance_odoo(user_name)
-    # --- END OF CHANGE ---
+    data = request.json
+    user_name = data.get('user_name')
+    if not user_name:
+        return jsonify({"success": False, "message": "No known face detected!"})
+
+    message, is_success = record_check_out(user_name)
 
     if is_success:
         app.last_action_time = now

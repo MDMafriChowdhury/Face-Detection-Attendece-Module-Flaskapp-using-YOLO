@@ -256,57 +256,83 @@
             }
         }
 
-        // --- 4. Send Attendance Action ---
-        async function sendAction(actionType) {
-            // Check if a user is currently recognized
-            if (!currentRecognizedUser.user_id) {
-                showFeedback("No known face is detected.", false);
-                return;
-            }
-
-            try {
-                const response = await fetch('/attendance_action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: actionType,
-                        user_id: currentRecognizedUser.user_id,
-                        user_name: currentRecognizedUser.user_name
-                    }),
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                showFeedback(data.message, data.success);
-
-            } catch (error) {
-                console.error('Error sending action:', error);
-                showFeedback('Client-side error. See console.', false);
-            }
-        }
-
-        // --- 5. Helper Function for Feedback ---
+        // --- 4. Helper Function for Feedback (UPDATED TIMER) ---
         function showFeedback(message, isSuccess) {
             if (feedbackTimer) clearTimeout(feedbackTimer);
             feedbackEl.textContent = message;
             feedbackEl.className = isSuccess ? 'feedback-success' : 'feedback-error';
+            
+            // --- MODIFIED ---
+            // Set timer to 5 seconds (5000ms) as requested
             feedbackTimer = setTimeout(() => {
                 feedbackEl.textContent = '';
                 feedbackEl.className = '';
-            }, 3000);
+            }, 5000); 
         }
 
-        // --- 6. Add Button Listeners ---
-        checkinBtn.addEventListener('click', () => sendAction('check-in'));
-        checkoutBtn.addEventListener('click', () => sendAction('check-out'));
+        // --- 5. Add Button Listeners (MODIFIED) ---
+        
+        // --- CHECK-IN BUTTON ---
+        checkinBtn.addEventListener('click', () => {
+            if (!currentRecognizedUser.user_name) {
+                showFeedback("No known face is detected.", false);
+                return;
+            }
+            
+            // Call the NEW /api/check_in route
+            fetch('/api/check_in', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: currentRecognizedUser.user_id,
+                    user_name: currentRecognizedUser.user_name
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // This will show "Checked in successfully" or "Already checked in."
+                showFeedback(data.message, data.success);
+            })
+            .catch(err => {
+                console.error("Check-in error:", err);
+                showFeedback("An error occurred.", false);
+            });
+        });
 
-        // --- 7. Initialize ---
+        // --- CHECK-OUT BUTTON ---
+        checkoutBtn.addEventListener('click', () => {
+            if (!currentRecognizedUser.user_name) {
+                showFeedback("No known face is detected.", false);
+                return;
+            }
+
+            // Call the NEW /api/check_out route
+            fetch('/api/check_out', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: currentRecognizedUser.user_id,
+                    user_name: currentRecognizedUser.user_name
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // This will show "Checked out successfully" or "Already checked out."
+                showFeedback(data.message, data.success);
+            })
+            .catch(err => {
+                console.error("Check-out error:", err);
+                showFeedback("An error occurred.", false);
+            });
+        });
+
+
+        // --- 6. Initialize ---
         (async () => {
             // Check for HTTPS
             if (window.location.protocol !== "https:") {
+                // This check is still valid, as the app is loaded
+                // from its own server (e.g., https://127.0.0.1:5000)
                 statusEl.textContent = "Error: Must use HTTPS for camera.";
                 showFeedback("Please use https:// link, not http://", false);
                 return;
@@ -320,4 +346,3 @@
 
 </body>
 </html>
-

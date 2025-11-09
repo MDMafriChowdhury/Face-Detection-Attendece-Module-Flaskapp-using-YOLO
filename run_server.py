@@ -1,22 +1,30 @@
 import os
 import ssl
 from cheroot import wsgi
-from cheroot.ssl.builtin import BuiltinSSLAdapter  # ✅ updated import
+from cheroot.ssl.builtin import BuiltinSSLAdapter
 
-# Import your app and setup functions
-from app import app, init_db, load_recognizer
+# Import your app and setup functions from app.py
+# NOTE: We DO NOT import init_db() for the Odoo version
+from app import app, load_encodings, DeepFace, DEEPFACE_MODEL
 
 # --- Server Setup ---
-print("[INFO] Initializing database...")
-init_db()
+# NO init_db() call
 
-print("[INFO] Loading face recognition models...")
-load_recognizer()
+print("[INFO] Loading face recognition encodings...")
+load_encodings()
+
+# --- Pre-load the model to make first request faster ---
+try:
+    print("[INFO] Pre-loading face recognition model... (This may take a moment)")
+    DeepFace.build_model(DEEPFACE_MODEL)
+    print("[INFO] Model pre-loaded successfully.")
+except Exception as e:
+    print(f"[ERROR] Could not pre-load model: {e}")
 
 # --- Configuration ---
 HOST = '0.0.0.0'
 PORT = 5000
-THREADS = 20
+THREADS = 20 # Number of worker threads
 
 print(f"[INFO] Starting Cheroot production server on https://{HOST}:{PORT}")
 print(f"[INFO] Running with {THREADS} threads.")
@@ -44,7 +52,7 @@ except FileNotFoundError:
     print("=" * 50)
     print("ERROR: 'cert.pem' and 'key.pem' not found in this directory.")
     print("Please run OpenSSL to generate them:")
-    print("  openssl req -new -x509 -days 365 -nodes -out cert.pem -keyout key.pem")
+    print("   openssl req -new -x509 -days 365 -nodes -out cert.pem -keyout key.pem")
     print("=" * 50)
     exit(1)
 except Exception as e:
